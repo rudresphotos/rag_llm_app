@@ -123,8 +123,6 @@ if "messages" not in st.session_state:
 
 # --- Sidebar ---
 with st.sidebar:
-    st.session_state.azure_openai_api_key = os.getenv("AZURE_OPENAI_API_KEY")
-
     st.selectbox(
         "Select a Model",
         options=MODELS,
@@ -172,13 +170,20 @@ with st.sidebar:
     ):
         st.write([] if not is_vector_db_loaded else [s for s in st.session_state.rag_sources])
 
+# --- Validate Environment Variables ---
+azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
+azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+
+if not azure_api_key or not azure_endpoint:
+    st.error("Azure API key or endpoint not set. Please configure environment variables.")
+    st.stop()
+
 # --- Main Chat Logic ---
 llm_stream = AzureChatOpenAI(
-    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-    openai_api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+    azure_endpoint=azure_endpoint,
+    api_version="2025-01-01-preview",
     model_name=st.session_state.model.split("/")[-1],
-    openai_api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-    openai_api_type="azure",
+    api_key=azure_api_key,
     temperature=0.3,
     streaming=True,
 )
