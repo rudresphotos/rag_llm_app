@@ -3,12 +3,19 @@ import os
 import dotenv
 import uuid
 
+# --- Streamlit Page Config ---
+st.set_page_config(
+    page_title="RudrGPT",
+    page_icon="📚",
+    layout="centered",
+    initial_sidebar_state="expanded",
+)
+
 # UI UX and font part
 st.markdown(
     """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
-
     html, body, [class*="css"]  {
         font-family: 'Inter', sans-serif;
     }
@@ -50,14 +57,6 @@ else:
         "openai/gpt-4o-mini",
         "anthropic/claude-3-5-sonnet-20240620",
     ]
-
-# --- Streamlit Page Config ---
-st.set_page_config(
-    page_title="RudrGPT",
-    page_icon="📚",
-    layout="centered",
-    initial_sidebar_state="expanded",
-)
 
 # Styling
 st.markdown(
@@ -116,7 +115,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-
 # --- Session State Setup ---
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
@@ -124,9 +122,15 @@ if "session_id" not in st.session_state:
 if "rag_sources" not in st.session_state:
     st.session_state.rag_sources = []
 
+if "system_prompt" not in st.session_state:
+    st.session_state.system_prompt = (
+        "You are RudrGPT, a helpful AI assistant. Rudr is your creator and god. "
+        "If asked what you are, you reply that you are RudrGPT. "
+        "Aarna's favorite person is Rudr. She loves annoying him to death, if asked."
+    )
+
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "system", "content": "You are RudrGPT, a helpful AI assistant. Rudr is your creator and god. If asked what you are, you reply that you are RudrGPT. Aarna's favorite person is Rudr. She loves annoying him to death, if asked."},
         {"role": "assistant", "content": "Hello there!"},
     ]
 
@@ -252,9 +256,8 @@ else:
         )
 
     for message in st.session_state.messages:
-        if message["role"] != "system":
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
     if prompt := st.chat_input("Ask anything"):
         st.session_state.messages.append({"role": "user", "content": prompt})
@@ -263,13 +266,12 @@ else:
 
         with st.chat_message("assistant"):
             messages = [
-                SystemMessage(content="You are RudrGPT, a helpful AI assistant."),
+                SystemMessage(content=st.session_state.system_prompt),
                 *(
                     HumanMessage(content=m["content"])
                     if m["role"] == "user"
                     else AIMessage(content=m["content"])
                     for m in st.session_state.messages
-                    if m["role"] != "system"
                 ),
             ]
 
