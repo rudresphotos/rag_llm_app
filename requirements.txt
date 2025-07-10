@@ -5,6 +5,8 @@ python-dotenv
 # LangChain and Azure integration
 langchain
 langchain-openai
+langchain-community
+
 
 # Optional: if you want to use Chroma for RAG (remove if not using)
 chromadb
