@@ -1,12 +1,23 @@
-streamlit
+# Core packages
+streamlit>=1.26.0
+python-dotenv
+
+# LangChain and Azure integration
 langchain
 langchain-openai
-langchain-chroma
+
+# Optional: if you want to use Chroma for RAG (remove if not using)
 chromadb
-openai
-python-dotenv
-pandas
-fastapi
-uvicorn
-tqdm
+
+# For parsing documents
+pypdf
+python-docx
+
+# For URL scraping
+beautifulsoup4
+requests
+
+# If you need pysqlite3 workaround on Linux
 pysqlite3-binary
+
+# Make sure to pin known working versions if you prefer
