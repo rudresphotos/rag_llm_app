@@ -9,3 +9,4 @@ pandas
 fastapi
 uvicorn
 tqdm
+pysqlite3-binary
