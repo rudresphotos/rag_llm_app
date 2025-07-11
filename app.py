@@ -178,11 +178,15 @@ if not azure_api_key or not azure_endpoint:
     st.error("Azure API key or endpoint not set. Please configure environment variables.")
     st.stop()
 
+# Debug print
+st.write("AZURE API KEY:", repr(azure_api_key))
+st.write("AZURE ENDPOINT:", repr(azure_endpoint))
+
 # --- Main Chat Logic ---
 llm_stream = AzureChatOpenAI(
     azure_endpoint=azure_endpoint,
     api_version="2025-01-01-preview",
-    model_name=st.session_state.model.split("/")[-1],
+    model_name="gpt-4o",   # <<<<<< HARDCODED DEPLOYMENT NAME
     api_key=azure_api_key,
     temperature=0.3,
     streaming=True,
