@@ -1,80 +1,85 @@
 import os
 import shutil
-import dotenv
 import streamlit as st
 import re
-from time import time
+from dotenv import load_dotenv
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
-from langchain_openai import OpenAIEmbeddings, AzureOpenAIEmbeddings
-from langchain_community.document_loaders.text import TextLoader
+from langchain_community.vectorstores import FAISS
+from langchain_openai import AzureOpenAIEmbeddings
 from langchain_community.document_loaders import (
-    WebBaseLoader,
     PyPDFLoader,
+    TextLoader,
     Docx2txtLoader,
+    WebBaseLoader,
 )
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-dotenv.load_dotenv()
+load_dotenv()
 
 DB_DOCS_LIMIT = 10
 
+# --- Embedding Model ---
 def get_embedding_model():
-    if os.getenv("AZURE_OPENAI_API_KEY") and os.getenv("AZURE_OPENAI_API_KEY").strip() != "":
-        return AzureOpenAIEmbeddings(
-            api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-            openai_api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
-            model=os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-3-large")
-        )
-    else:
-        return OpenAIEmbeddings(api_key=st.session_state.get("openai_api_key"))
+    return AzureOpenAIEmbeddings(
+        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+        openai_api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+        model=os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-3-large")
+    )
 
+# --- Split Documents ---
 def _split_and_load_docs(docs):
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=200,
-    )
-    document_chunks = text_splitter.split_documents(docs)
+    return RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=200).split_documents(docs)
 
-    if "vector_db" not in st.session_state or st.session_state.vector_db is None:
-        st.session_state.vector_db = initialize_vector_db(document_chunks)
-    else:
-        st.session_state.vector_db.add_documents(document_chunks)
+# --- FAISS: Create and Save Vector DB ---
+def create_faiss_from_documents(chunks, collection_name):
+    persist_dir = f"faiss_dbs/{collection_name}"
+    os.makedirs(persist_dir, exist_ok=True)
+    db = FAISS.from_documents(chunks, embedding=get_embedding_model())
+    db.save_local(persist_dir)
+    st.session_state.vector_db = db
 
-def initialize_vector_db(docs):
+# --- FAISS: Load Existing DB ---
+def load_vector_db(collection_name):
+    persist_dir = f"faiss_dbs/{collection_name}"
+    index_path = os.path.join(persist_dir, "index.faiss")
     embedding = get_embedding_model()
-    vector_db = Chroma.from_documents(
-        documents=docs,
-        embedding=embedding,
-        collection_name=f"{str(time()).replace('.', '')[:14]}_" + st.session_state["session_id"],
-    )
-    chroma_client = vector_db._client
-    collection_names = sorted([c.name for c in chroma_client.list_collections()])
-    while len(collection_names) > 20:
-        chroma_client.delete_collection(collection_names[0])
-        collection_names.pop(0)
-    return vector_db
 
+    if os.path.exists(index_path):
+        db = FAISS.load_local(
+            persist_dir,
+            embeddings=embedding,
+            allow_dangerous_deserialization=True
+        )
+        st.session_state.vector_db = db
+    else:
+        st.warning(f"⚠️ Vector DB for '{collection_name}' not found. Upload documents first.")
+        st.session_state.vector_db = None
+
+# --- List all .txt files in docs/ ---
 def list_docs_files():
     import glob
     files = glob.glob("docs/*.txt")
     return [os.path.basename(f) for f in files]
 
+# --- Load a single file from docs/ ---
 def load_single_doc_file(filename):
+    collection_name = filename.rsplit(".", 1)[0]
     file_path = os.path.join("docs", filename)
     loader = TextLoader(file_path)
     docs = loader.load()
     if docs:
-        _split_and_load_docs(docs)
+        chunks = _split_and_load_docs(docs)
+        create_faiss_from_documents(chunks, collection_name)
         if "rag_sources" not in st.session_state:
             st.session_state.rag_sources = []
         if filename not in st.session_state.rag_sources:
             st.session_state.rag_sources.append(filename)
 
+# --- Load Uploaded Files ---
 def load_doc_to_db():
     if "rag_docs" in st.session_state and st.session_state.rag_docs:
         docs = []
@@ -97,7 +102,8 @@ def load_doc_to_db():
                             st.warning(f"Document type {doc_file.type} not supported.")
                             continue
 
-                        docs.extend(loader.load())
+                        loaded = loader.load()
+                        docs += loaded
                         st.session_state.rag_sources.append(doc_file.name)
 
                     except Exception as e:
@@ -110,12 +116,14 @@ def load_doc_to_db():
                     st.error(f"Maximum number of documents reached ({DB_DOCS_LIMIT}).")
 
         if docs:
-            _split_and_load_docs(docs)
+            chunks = _split_and_load_docs(docs)
+            create_faiss_from_documents(chunks, "user_uploads")
             st.toast(
                 f"Document *{str([doc_file.name for doc_file in st.session_state.rag_docs])[1:-1]}* loaded successfully.",
                 icon="✅"
             )
 
+# --- Load from URL ---
 def load_url_to_db():
     if "rag_url" in st.session_state and st.session_state.rag_url:
         url = st.session_state.rag_url
@@ -124,17 +132,20 @@ def load_url_to_db():
             if len(st.session_state.rag_sources) < DB_DOCS_LIMIT:
                 try:
                     loader = WebBaseLoader(url)
-                    docs.extend(loader.load())
+                    loaded = loader.load()
+                    docs += loaded
                     st.session_state.rag_sources.append(url)
                 except Exception as e:
                     st.error(f"Error loading document from {url}: {e}")
 
                 if docs:
-                    _split_and_load_docs(docs)
+                    chunks = _split_and_load_docs(docs)
+                    create_faiss_from_documents(chunks, "url_uploads")
                     st.toast(f"Document from URL *{url}* loaded successfully.", icon="✅")
             else:
                 st.error(f"Maximum number of documents reached ({DB_DOCS_LIMIT}).")
 
+# --- RAG Chain Construction ---
 def _get_context_retriever_chain(vector_db, llm):
     retriever = vector_db.as_retriever()
     prompt = ChatPromptTemplate.from_messages([
