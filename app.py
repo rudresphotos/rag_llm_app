@@ -86,9 +86,6 @@ from rag_methods import (
 
 dotenv.load_dotenv()
 
-# --- Models ---
-MODELS = ["azure-openai/gpt-4o"]
-
 # --- Session State Setup ---
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
@@ -109,21 +106,17 @@ if "messages" not in st.session_state:
 
 # --- Sidebar ---
 with st.sidebar:
-    st.selectbox(
-        "Select a Model",
-        options=MODELS,
-        key="model",
-    )
-
     st.markdown("### 📁 Docs Collection")
     docs_files = list_docs_files()
-    selected_doc = st.selectbox("Select a file from docs", ["None"] + docs_files)
+    loaded_docs = [s for s in st.session_state.rag_sources if s in docs_files]
+    # Only show docs that are not already loaded
+    selectable_docs = ["None"] + [doc for doc in docs_files if doc not in loaded_docs]
+    selected_doc = st.selectbox("Select a file from docs", selectable_docs)
 
     if selected_doc != "None":
         load_single_doc_file(selected_doc)
         st.success(f"✅ Loaded: {selected_doc}")
 
-    loaded_docs = [s for s in st.session_state.rag_sources if s in docs_files]
     st.markdown("#### 📚 Loaded Docs")
     if loaded_docs:
         for i, doc in enumerate(loaded_docs, 1):
@@ -184,7 +177,7 @@ if not azure_api_key or not azure_endpoint:
 llm_stream = AzureChatOpenAI(
     azure_endpoint=azure_endpoint,
     api_version="2025-01-01-preview",
-    model_name=st.session_state.model.split("/")[-1],
+    model_name="gpt-4o",
     api_key=azure_api_key,
     temperature=0.3,
     streaming=True,

@@ -65,7 +65,7 @@ def list_docs_files():
     files = glob.glob("docs/*.txt")
     return [os.path.basename(f) for f in files]
 
-# --- Load a single file from docs/ ---
+# --- Load a single file from docs/ as a collection ---
 def load_single_doc_file(filename):
     collection_name = filename.rsplit(".", 1)[0]
     file_path = os.path.join("docs", filename)
@@ -79,7 +79,7 @@ def load_single_doc_file(filename):
         if filename not in st.session_state.rag_sources:
             st.session_state.rag_sources.append(filename)
 
-# --- Load Uploaded Files ---
+# --- Load Uploaded Files (Session RAG) ---
 def load_doc_to_db():
     if "rag_docs" in st.session_state and st.session_state.rag_docs:
         docs = []
@@ -117,13 +117,17 @@ def load_doc_to_db():
 
         if docs:
             chunks = _split_and_load_docs(docs)
-            create_faiss_from_documents(chunks, "user_uploads")
+            # --- Add to existing vector DB if present, else create new ---
+            if "vector_db" not in st.session_state or st.session_state.vector_db is None:
+                st.session_state.vector_db = FAISS.from_documents(chunks, embedding=get_embedding_model())
+            else:
+                st.session_state.vector_db.add_documents(chunks)
             st.toast(
                 f"Document *{str([doc_file.name for doc_file in st.session_state.rag_docs])[1:-1]}* loaded successfully.",
                 icon="✅"
             )
 
-# --- Load from URL ---
+# --- Load from URL (Session RAG) ---
 def load_url_to_db():
     if "rag_url" in st.session_state and st.session_state.rag_url:
         url = st.session_state.rag_url
@@ -140,7 +144,10 @@ def load_url_to_db():
 
                 if docs:
                     chunks = _split_and_load_docs(docs)
-                    create_faiss_from_documents(chunks, "url_uploads")
+                    if "vector_db" not in st.session_state or st.session_state.vector_db is None:
+                        st.session_state.vector_db = FAISS.from_documents(chunks, embedding=get_embedding_model())
+                    else:
+                        st.session_state.vector_db.add_documents(chunks)
                     st.toast(f"Document from URL *{url}* loaded successfully.", icon="✅")
             else:
                 st.error(f"Maximum number of documents reached ({DB_DOCS_LIMIT}).")
