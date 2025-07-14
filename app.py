@@ -1,7 +1,7 @@
 import streamlit as st
 import os
-import dotenv
 import uuid
+import dotenv
 
 # --- Streamlit Page Config ---
 st.set_page_config(
@@ -11,7 +11,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# UI UX and font part
+# UI/UX and Font Styling
 st.markdown(
     """
     <style>
@@ -19,36 +19,6 @@ st.markdown(
     html, body, [class*="css"]  {
         font-family: 'Inter', sans-serif;
     }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
-# Check if it's Linux so it works on Streamlit Cloud
-#if os.name == "posix":
-#    __import__("pysqlite3")
-#    import sys
-#    sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
-
-from langchain_openai import AzureChatOpenAI
-from langchain.schema import HumanMessage, AIMessage, SystemMessage
-
-from rag_methods import (
-    load_doc_to_db,
-    load_url_to_db,
-    stream_llm_response,
-    stream_llm_rag_response,
-)
-
-dotenv.load_dotenv()
-
-# --- Models ---
-MODELS = ["azure-openai/gpt-4o"]
-
-# Styling
-st.markdown(
-    """
-    <style>
     body {
         background-color: #1E1E1E;
         color: #E0E0E0;
@@ -102,6 +72,23 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+from langchain_openai import AzureChatOpenAI
+from langchain.schema import HumanMessage, AIMessage, SystemMessage
+
+from rag_methods import (
+    list_docs_files,
+    load_single_doc_file,
+    load_doc_to_db,
+    load_url_to_db,
+    stream_llm_response,
+    stream_llm_rag_response,
+)
+
+dotenv.load_dotenv()
+
+# --- Models ---
+MODELS = ["azure-openai/gpt-4o"]
+
 # --- Session State Setup ---
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
@@ -127,6 +114,22 @@ with st.sidebar:
         options=MODELS,
         key="model",
     )
+
+    st.markdown("### 📁 Docs Collection")
+    docs_files = list_docs_files()
+    selected_doc = st.selectbox("Select a file from docs", ["None"] + docs_files)
+
+    if selected_doc != "None":
+        load_single_doc_file(selected_doc)
+        st.success(f"✅ Loaded: {selected_doc}")
+
+    loaded_docs = [s for s in st.session_state.rag_sources if s in docs_files]
+    st.markdown("#### 📚 Loaded Docs")
+    if loaded_docs:
+        for i, doc in enumerate(loaded_docs, 1):
+            st.write(f"{i}. {doc}")
+    else:
+        st.write("_No docs loaded yet._")
 
     cols0 = st.columns(2)
     with cols0[0]:

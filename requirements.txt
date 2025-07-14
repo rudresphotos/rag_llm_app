@@ -1,22 +1,23 @@
-# Streamlit and dotenv
-streamlit>=1.26.0
+streamlit
 python-dotenv
+langchain>=0.1.17
+langchain-community
+langchain-core
+openai
 
-# LangChain and Azure integration
-langchain==0.1.13
-langchain-community==0.0.29
-langchain-openai==0.1.2
+duckdb
+langchain-openai==0.1.7
+faiss-cpu
 
-# RAG (Chroma)
-chromadb
-
-# Parsing documents
+# Document loaders
 pypdf
-python-docx
-
-# URL scraping
+docx2txt
+unstructured
 beautifulsoup4
-requests
 
-# aiohttp (compatible with langchain)
-aiohttp>=3.9.0
+# Tokenization
+tiktoken
+
+# Optional utilities
+tqdm
+watchdog

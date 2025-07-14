@@ -1,40 +1,79 @@
 import os
+import shutil
 import dotenv
-from time import time
 import streamlit as st
+import re
+from time import time
 
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import Chroma
+from langchain_openai import OpenAIEmbeddings, AzureOpenAIEmbeddings
 from langchain_community.document_loaders.text import TextLoader
 from langchain_community.document_loaders import (
     WebBaseLoader,
     PyPDFLoader,
     Docx2txtLoader,
 )
-# pip install docx2txt pypdf
-from langchain_community.vectorstores import Chroma
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings, AzureOpenAIEmbeddings
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
 dotenv.load_dotenv()
 
-os.environ["USER_AGENT"] = "myagent"
 DB_DOCS_LIMIT = 10
 
+def get_embedding_model():
+    if os.getenv("AZURE_OPENAI_API_KEY") and os.getenv("AZURE_OPENAI_API_KEY").strip() != "":
+        return AzureOpenAIEmbeddings(
+            api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+            openai_api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+            model=os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-3-large")
+        )
+    else:
+        return OpenAIEmbeddings(api_key=st.session_state.get("openai_api_key"))
 
-# Function to stream the response of the LLM
-def stream_llm_response(llm_stream, messages):
-    response_message = ""
+def _split_and_load_docs(docs):
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=800,
+        chunk_overlap=200,
+    )
+    document_chunks = text_splitter.split_documents(docs)
 
-    for chunk in llm_stream.stream(messages):
-        response_message += chunk.content
-        yield chunk
+    if "vector_db" not in st.session_state or st.session_state.vector_db is None:
+        st.session_state.vector_db = initialize_vector_db(document_chunks)
+    else:
+        st.session_state.vector_db.add_documents(document_chunks)
 
-    st.session_state.messages.append({"role": "assistant", "content": response_message})
+def initialize_vector_db(docs):
+    embedding = get_embedding_model()
+    vector_db = Chroma.from_documents(
+        documents=docs,
+        embedding=embedding,
+        collection_name=f"{str(time()).replace('.', '')[:14]}_" + st.session_state["session_id"],
+    )
+    chroma_client = vector_db._client
+    collection_names = sorted([c.name for c in chroma_client.list_collections()])
+    while len(collection_names) > 20:
+        chroma_client.delete_collection(collection_names[0])
+        collection_names.pop(0)
+    return vector_db
 
+def list_docs_files():
+    import glob
+    files = glob.glob("docs/*.txt")
+    return [os.path.basename(f) for f in files]
 
-# --- Indexing Phase ---
+def load_single_doc_file(filename):
+    file_path = os.path.join("docs", filename)
+    loader = TextLoader(file_path)
+    docs = loader.load()
+    if docs:
+        _split_and_load_docs(docs)
+        if "rag_sources" not in st.session_state:
+            st.session_state.rag_sources = []
+        if filename not in st.session_state.rag_sources:
+            st.session_state.rag_sources.append(filename)
 
 def load_doc_to_db():
     if "rag_docs" in st.session_state and st.session_state.rag_docs:
@@ -77,7 +116,6 @@ def load_doc_to_db():
                 icon="✅"
             )
 
-
 def load_url_to_db():
     if "rag_url" in st.session_state and st.session_state.rag_url:
         url = st.session_state.rag_url
@@ -88,62 +126,14 @@ def load_url_to_db():
                     loader = WebBaseLoader(url)
                     docs.extend(loader.load())
                     st.session_state.rag_sources.append(url)
-
                 except Exception as e:
                     st.error(f"Error loading document from {url}: {e}")
 
                 if docs:
                     _split_and_load_docs(docs)
                     st.toast(f"Document from URL *{url}* loaded successfully.", icon="✅")
-
             else:
                 st.error(f"Maximum number of documents reached ({DB_DOCS_LIMIT}).")
-
-
-def initialize_vector_db(docs):
-    # ✅ Use Azure embeddings if AZURE env vars are configured, else fallback to OpenAI
-    if os.getenv("AZURE_OPENAI_API_KEY") and os.getenv("AZURE_OPENAI_API_KEY").strip() != "":
-        embedding = AzureOpenAIEmbeddings(
-            azure_deployment=os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT"),
-            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-            api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-            api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
-        )
-    else:
-        embedding = OpenAIEmbeddings(api_key=st.session_state.openai_api_key)
-
-    vector_db = Chroma.from_documents(
-        documents=docs,
-        embedding=embedding,
-        collection_name=f"{str(time()).replace('.', '')[:14]}_" + st.session_state["session_id"],
-    )
-
-    # Keep only last 20 collections
-    chroma_client = vector_db._client
-    collection_names = sorted([c.name for c in chroma_client.list_collections()])
-    print("Number of collections:", len(collection_names))
-    while len(collection_names) > 20:
-        chroma_client.delete_collection(collection_names[0])
-        collection_names.pop(0)
-
-    return vector_db
-
-
-def _split_and_load_docs(docs):
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=5000,
-        chunk_overlap=1000,
-    )
-
-    document_chunks = text_splitter.split_documents(docs)
-
-    if "vector_db" not in st.session_state:
-        st.session_state.vector_db = initialize_vector_db(document_chunks)
-    else:
-        st.session_state.vector_db.add_documents(document_chunks)
-
-
-# --- Retrieval Augmented Generation (RAG) Phase ---
 
 def _get_context_retriever_chain(vector_db, llm):
     retriever = vector_db.as_retriever()
@@ -153,16 +143,13 @@ def _get_context_retriever_chain(vector_db, llm):
         ("user", "Given the above conversation, generate a search query to look up in order to get information relevant to the conversation, focusing on the most recent messages."),
     ])
     retriever_chain = create_history_aware_retriever(llm, retriever, prompt)
-
     return retriever_chain
-
 
 def get_conversational_rag_chain(llm):
     retriever_chain = _get_context_retriever_chain(st.session_state.vector_db, llm)
-
     prompt = ChatPromptTemplate.from_messages([
         ("system",
-         """You are a helpful assistant. You will have to answer user's queries.
+         """You are RudrGPT, a helpful assistant. You will have to answer user's queries.
          You will have some context to help with your answers, but not always completely related or helpful.
          You can also use your knowledge to assist answering the user's queries.\n
          {context}"""),
@@ -170,15 +157,19 @@ def get_conversational_rag_chain(llm):
         ("user", "{input}"),
     ])
     stuff_documents_chain = create_stuff_documents_chain(llm, prompt)
-
     return create_retrieval_chain(retriever_chain, stuff_documents_chain)
 
+def stream_llm_response(llm_stream, messages):
+    response_message = ""
+    for chunk in llm_stream.stream(messages):
+        response_message += chunk.content
+        yield chunk.content
+    st.session_state.messages.append({"role": "assistant", "content": response_message})
 
 def stream_llm_rag_response(llm_stream, messages):
     conversation_rag_chain = get_conversational_rag_chain(llm_stream)
-    response_message = "*(RAG Response)*\n"
+    response_message = ""
     for chunk in conversation_rag_chain.pick("answer").stream({"messages": messages[:-1], "input": messages[-1].content}):
         response_message += chunk
         yield chunk
-
     st.session_state.messages.append({"role": "assistant", "content": response_message})
