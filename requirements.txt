@@ -3,21 +3,20 @@ python-dotenv
 langchain>=0.1.17
 langchain-community
 langchain-core
-openai
-
-duckdb
 langchain-openai==0.1.7
+openai
+tiktoken
 faiss-cpu
+duckdb
 
 # Document loaders
 pypdf
 docx2txt
-unstructured
 beautifulsoup4
-
-# Tokenization
-tiktoken
 
 # Optional utilities
 tqdm
 watchdog
+
+# Azure Blob Storage SDK
+azure-storage-blob

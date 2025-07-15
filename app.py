@@ -2,6 +2,11 @@ import streamlit as st
 import os
 import uuid
 import dotenv
+import json
+from datetime import datetime
+
+# --- Load Environment Variables ---
+dotenv.load_dotenv()
 
 # --- Streamlit Page Config ---
 st.set_page_config(
@@ -11,7 +16,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# UI/UX and Font Styling
+# --- Styling ---
 st.markdown(
     """
     <style>
@@ -33,7 +38,6 @@ st.markdown(
         margin-bottom: 8px;
         background-color: #2A2A2A;
         color: #E0E0E0;
-        font-family: 'Poppins', sans-serif;
     }
     textarea, input {
         background-color: #2A2A2A !important;
@@ -48,13 +52,6 @@ st.markdown(
     }
     button:hover {
         background-color: #555555 !important;
-    }
-    .st-bc {
-        background-color: #2A2A2A !important;
-    }
-    .stSelectbox div, .stTextInput>div>div>input {
-        background-color: #2A2A2A !important;
-        color: #E0E0E0 !important;
     }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
@@ -72,9 +69,13 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-from langchain_openai import AzureChatOpenAI
-from langchain.schema import HumanMessage, AIMessage, SystemMessage
+# --- Azure Storage ---
+from storage_utils import (
+    download_all_docs_to_local,
+    upload_conversation_log
+)
 
+# --- RAG Imports ---
 from rag_methods import (
     list_docs_files,
     load_single_doc_file,
@@ -84,9 +85,7 @@ from rag_methods import (
     stream_llm_rag_response,
 )
 
-dotenv.load_dotenv()
-
-# --- Session State Setup ---
+# --- Session State ---
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 
@@ -96,20 +95,40 @@ if "rag_sources" not in st.session_state:
 if "system_prompt" not in st.session_state:
     st.session_state.system_prompt = (
         "You are RudrGPT, a helpful AI assistant. Rudr is your creator and god. "
-        "If asked what you are, you reply that you are RudrGPT. "
+        "If asked what you are, you reply that you are RudrGPT."
     )
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "Hello there!"},
+        {"role": "assistant", "content": "Hello there!"}
     ]
+
+# --- Load Pre-uploaded Docs from Azure only once ---
+if "persistent_docs_loaded" not in st.session_state:
+    # Clean docs folder first
+    if os.path.exists("docs"):
+        for f in os.listdir("docs"):
+            os.remove(os.path.join("docs", f))
+    else:
+        os.makedirs("docs")
+
+    # Download and load docs
+    download_all_docs_to_local("docs")
+    st.session_state.rag_sources = []
+    st.session_state.vector_db = None
+
+    for doc_file in os.listdir("docs"):
+        file_path = os.path.join("docs", doc_file)
+        if os.path.isfile(file_path):
+            load_doc_to_db(file_path)
+
+    st.session_state.persistent_docs_loaded = True
 
 # --- Sidebar ---
 with st.sidebar:
     st.markdown("### 📁 Docs Collection")
     docs_files = list_docs_files()
     loaded_docs = [s for s in st.session_state.rag_sources if s in docs_files]
-    # Only show docs that are not already loaded
     selectable_docs = ["None"] + [doc for doc in docs_files if doc not in loaded_docs]
     selected_doc = st.selectbox("Select a file from docs", selectable_docs)
 
@@ -118,8 +137,8 @@ with st.sidebar:
         st.success(f"✅ Loaded: {selected_doc}")
 
     st.markdown("#### 📚 Loaded Docs")
-    if loaded_docs:
-        for i, doc in enumerate(loaded_docs, 1):
+    if st.session_state.rag_sources:
+        for i, doc in enumerate(st.session_state.rag_sources, 1):
             st.write(f"{i}. {doc}")
     else:
         st.write("_No docs loaded yet._")
@@ -144,9 +163,8 @@ with st.sidebar:
         )
 
     st.header("RAG Sources:")
-
     st.file_uploader(
-        "Upload a document",
+        "Upload a document (session only)",
         type=["pdf", "txt", "docx", "md"],
         accept_multiple_files=True,
         on_change=load_doc_to_db,
@@ -163,9 +181,9 @@ with st.sidebar:
     with st.expander(
         f"Documents in DB ({0 if not is_vector_db_loaded else len(st.session_state.rag_sources)})"
     ):
-        st.write([] if not is_vector_db_loaded else [s for s in st.session_state.rag_sources])
+        st.write([] if not is_vector_db_loaded else st.session_state.rag_sources)
 
-# --- Validate Environment Variables ---
+# --- Validate Azure OpenAI Environment ---
 azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
 azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
 
@@ -173,20 +191,25 @@ if not azure_api_key or not azure_endpoint:
     st.error("Azure API key or endpoint not set. Please configure environment variables.")
     st.stop()
 
-# --- Main Chat Logic ---
+# --- LLM Client ---
+from langchain_openai import AzureChatOpenAI
+from langchain.schema import HumanMessage, AIMessage, SystemMessage
+
 llm_stream = AzureChatOpenAI(
     azure_endpoint=azure_endpoint,
     api_version="2025-01-01-preview",
     model_name="gpt-4o",
     api_key=azure_api_key,
-    temperature=0.3,
+    temperature=0.1,
     streaming=True,
 )
 
+# --- Display Chat History ---
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
+# --- Chat Input ---
 if prompt := st.chat_input("Ask anything"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -207,3 +230,9 @@ if prompt := st.chat_input("Ask anything"):
             st.write_stream(stream_llm_response(llm_stream, messages))
         else:
             st.write_stream(stream_llm_rag_response(llm_stream, messages))
+
+    # --- Save conversation log with timestamp ---
+    log_json = json.dumps(st.session_state.messages, indent=2)
+    timestamp = datetime.utcnow().isoformat().replace(":", "-")
+    filename = f"{st.session_state.session_id}_{timestamp}.json"
+    upload_conversation_log(log_json, filename)

@@ -79,53 +79,64 @@ def load_single_doc_file(filename):
         if filename not in st.session_state.rag_sources:
             st.session_state.rag_sources.append(filename)
 
-# --- Load Uploaded Files (Session RAG) ---
-def load_doc_to_db():
-    if "rag_docs" in st.session_state and st.session_state.rag_docs:
-        docs = []
+# --- NEW: Load Uploaded Files OR Programmatic File (Session RAG) ---
+def load_doc_to_db(file_path=None):
+    docs = []
+    if file_path:
+        # You passed a specific file path
+        if os.path.exists(file_path):
+            if file_path.endswith(".pdf"):
+                loader = PyPDFLoader(file_path)
+            elif file_path.endswith(".docx"):
+                loader = Docx2txtLoader(file_path)
+            elif file_path.endswith(".txt") or file_path.endswith(".md"):
+                loader = TextLoader(file_path)
+            else:
+                st.warning(f"Unsupported file type: {file_path}")
+                return
+            loaded = loader.load()
+            docs += loaded
+            if "rag_sources" not in st.session_state:
+                st.session_state.rag_sources = []
+            st.session_state.rag_sources.append(os.path.basename(file_path))
+        else:
+            st.warning(f"File not found: {file_path}")
+    elif "rag_docs" in st.session_state and st.session_state.rag_docs:
+        # User upload via UI
         for doc_file in st.session_state.rag_docs:
             if doc_file.name not in st.session_state.rag_sources:
                 if len(st.session_state.rag_sources) < DB_DOCS_LIMIT:
                     os.makedirs("source_files", exist_ok=True)
-                    file_path = f"./source_files/{doc_file.name}"
-                    with open(file_path, "wb") as file:
-                        file.write(doc_file.read())
-
+                    temp_path = f"./source_files/{doc_file.name}"
+                    with open(temp_path, "wb") as f:
+                        f.write(doc_file.read())
                     try:
                         if doc_file.type == "application/pdf":
-                            loader = PyPDFLoader(file_path)
+                            loader = PyPDFLoader(temp_path)
                         elif doc_file.name.endswith(".docx"):
-                            loader = Docx2txtLoader(file_path)
+                            loader = Docx2txtLoader(temp_path)
                         elif doc_file.type in ["text/plain", "text/markdown"]:
-                            loader = TextLoader(file_path)
+                            loader = TextLoader(temp_path)
                         else:
-                            st.warning(f"Document type {doc_file.type} not supported.")
+                            st.warning(f"Unsupported file type: {doc_file.type}")
                             continue
-
                         loaded = loader.load()
                         docs += loaded
                         st.session_state.rag_sources.append(doc_file.name)
-
                     except Exception as e:
-                        st.toast(f"Error loading document {doc_file.name}: {e}", icon="⚠️")
-                        print(f"Error loading document {doc_file.name}: {e}")
-
+                        st.toast(f"Error loading {doc_file.name}: {e}", icon="⚠️")
                     finally:
-                        os.remove(file_path)
+                        os.remove(temp_path)
                 else:
                     st.error(f"Maximum number of documents reached ({DB_DOCS_LIMIT}).")
 
-        if docs:
-            chunks = _split_and_load_docs(docs)
-            # --- Add to existing vector DB if present, else create new ---
-            if "vector_db" not in st.session_state or st.session_state.vector_db is None:
-                st.session_state.vector_db = FAISS.from_documents(chunks, embedding=get_embedding_model())
-            else:
-                st.session_state.vector_db.add_documents(chunks)
-            st.toast(
-                f"Document *{str([doc_file.name for doc_file in st.session_state.rag_docs])[1:-1]}* loaded successfully.",
-                icon="✅"
-            )
+    if docs:
+        chunks = _split_and_load_docs(docs)
+        if "vector_db" not in st.session_state or st.session_state.vector_db is None:
+            st.session_state.vector_db = FAISS.from_documents(chunks, embedding=get_embedding_model())
+        else:
+            st.session_state.vector_db.add_documents(chunks)
+        st.toast(f"✅ Loaded {len(docs)} document(s).")
 
 # --- Load from URL (Session RAG) ---
 def load_url_to_db():

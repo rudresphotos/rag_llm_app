@@ -1,4 +1,0 @@
-Rudr Bisht is doing internship at MEITY, New Delhi
-His mentor is Rajeshwar Singh Jenwar sir
-His FIC is Gopal Singh Phartiyal sir
-He first created local chatbot using llama 
