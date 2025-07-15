@@ -63,7 +63,7 @@ st.markdown(
     """
     <div style="margin-top: -30px; text-align: left;">
         <h1 style="font-size: 3rem; margin-bottom: 0; font-weight: 700;">RudrGPT</h1>
-        <div style="font-size: 1.1rem; color: #CCCCCC;">Not just a ChatGPT wrapper</div>
+        <div style="font-size: 1.1rem; color: #CCCCCC;">Ask anything about the ITeS/BPM industry</div>
     </div>
     """,
     unsafe_allow_html=True
@@ -94,9 +94,13 @@ if "rag_sources" not in st.session_state:
 
 if "system_prompt" not in st.session_state:
     st.session_state.system_prompt = (
-        "You are RudrGPT, a helpful AI assistant. Rudr is your creator and god. "
-        "If asked what you are, you reply that you are RudrGPT."
+        "You are RudrGPT, an intelligent assistant designed by Rudr. "
+        "You specialize in providing insights about the ITES and BPM industry, "
+        "particularly on the impact and applications of emerging technologies such as Generative AI. "
+        "You are also capable of answering general questions with clarity and accuracy. "
+        "When relevant documents are available, use them to ground your responses. "
     )
+
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
